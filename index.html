@@ -17,6 +17,7 @@ h2{font-size:1.05rem;margin:0 0 8px}
 label{display:block;color:var(--mut);font-size:.85rem;margin:10px 0 3px}
 input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
 textarea{min-height:90px}textarea.sm{min-height:64px}
+table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}tr.tot td{font-weight:600}
 button.go{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:600 1rem system-ui}
 button:disabled{opacity:.5}
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -41,6 +42,7 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
   <label for="dn">Dinner</label><textarea class="sm" id="dn"></textarea>
   <label for="sk">Snacks and other drinks</label><textarea class="sm" id="sk"></textarea>
   <label for="t">Training</label><input id="t">
+  <label for="done" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="done" style="width:auto">This day is finished (nothing more to log)</label>
   <button class="go" id="send">Get feedback</button><div class="mut" id="msg"></div></div>
  <div class="card" id="fbcard" hidden><h2>Trainer feedback</h2><div id="meals" class="mut"></div><p class="fb" id="fb"></p><p class="fb" id="tm"></p>
   <button class="lnk" id="fix">Correct calories and protein</button></div>
@@ -95,10 +97,12 @@ function render(){
   $('#chart').innerHTML=`<polyline fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.map((v,i)=>`${i/(pts.length-1)*300},${100-(v-mn)/(mx-mn)*100}`).join(' ')}"/>`;
   $('#cap').textContent=`Weight, last ${pts.length} entries: ${Math.min(...pts)}–${Math.max(...pts)} kg`;
  }else{$('#chart').innerHTML='';$('#cap').textContent='Log two mornings to see your weight trend.'}
- $('#d').value=cur;$('#w').value=d.weight??'';$('#s').value=d.steps??'';const legacy=d.food&&!(d.bk||d.ln||d.dn||d.sk);$('#bk').value=legacy?d.food:(d.bk??'');$('#ln').value=d.ln??'';$('#dn').value=d.dn??'';$('#sk').value=d.sk??'';$('#t').value=d.training??'';
+ $('#d').value=cur;$('#w').value=d.weight??'';$('#s').value=d.steps??'';const legacy=d.food&&!(d.bk||d.ln||d.dn||d.sk);$('#bk').value=legacy?d.food:(d.bk??'');$('#ln').value=d.ln??'';$('#dn').value=d.dn??'';$('#sk').value=d.sk??'';$('#done').checked=d.done??(cur<today());$('#t').value=d.training??'';
  $('#fbcard').hidden=!d.feedback;
- if(d.feedback){$('#fb').textContent=d.feedback;$('#tm').textContent=d.tomorrow?'Tomorrow: '+d.tomorrow:'';
-  $('#meals').innerHTML=(d.meals||[]).map(m=>`${esc(m.name)}: ${esc(m.kcal)} kcal, ${esc(m.protein_g)} g`).join('<br>')}
+ if(d.feedback){$('#fb').textContent=d.feedback;const nx=d.next||d.tomorrow;$('#tm').textContent=nx?(d.done?'Tomorrow: ':'Next: ')+nx:'';
+  const lab={breakfast:'Breakfast',lunch:'Lunch',dinner:'Dinner',snacks:'Snacks'},n=v=>v==null||isNaN(v)?'–':Math.round(v);
+  const rows=(d.meals||[]).map(m=>`<tr><td>${esc(lab[m.slot]||m.slot||m.name||'Meal')}</td><td>${n(m.kcal)}</td><td>${n(m.protein_g)}</td><td>${n(m.carbs_g)}</td><td>${n(m.fat_g)}</td></tr>`).join('');
+  $('#meals').innerHTML=rows?`<table><tr><th></th><th>kcal</th><th>Protein g</th><th>Carbs g</th><th>Fat g</th></tr>${rows}<tr class="tot"><td>Total</td><td>${n(d.cal)}</td><td>${n(d.prot)}</td><td>${n(d.carb)}</td><td>${n(d.fat)}</td></tr></table>`:''}
  $('#hl').innerHTML='<h2>History</h2>'+(ks.length?ks.slice().reverse().map(k=>{const x=S.days[k];
   return `<details><summary>${k}: ${x.weight??'–'} kg, ${x.steps??'–'} steps, ${x.cal??'–'} kcal, ${x.prot??'–'} g</summary><p class="fb mut">${esc(x.food)}</p><p class="fb">${esc(x.feedback)}</p></details>`}).join(''):'<p class="mut">No entries yet. Your first check-in appears here.</p>');
  $('#k').value=S.key;$('#m').value=S.model;$('#m2').value=S.model2||'';$('#hf').checked=!!S.histFood;$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
@@ -110,14 +114,15 @@ $('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'
 $('#fix').onclick=()=>{const d=S.days[cur];const c=prompt('Calories for this day',d.cal);if(c===null)return;
  const p=prompt('Protein (g) for this day',d.prot);if(p===null)return;d.cal=+c||d.cal;d.prot=+p||d.prot;save();render()};
 
-const schema={type:'OBJECT',properties:{calories:{type:'NUMBER'},protein_g:{type:'NUMBER'},
- meals:{type:'ARRAY',items:{type:'OBJECT',properties:{name:{type:'STRING'},kcal:{type:'NUMBER'},protein_g:{type:'NUMBER'}},required:['name','kcal','protein_g']}},
- feedback:{type:'STRING'},tomorrow:{type:'STRING'}},required:['calories','protein_g','meals','feedback','tomorrow']};
+const schema={type:'OBJECT',properties:{
+ meals:{type:'ARRAY',items:{type:'OBJECT',properties:{slot:{type:'STRING'},kcal:{type:'NUMBER'},protein_g:{type:'NUMBER'},carbs_g:{type:'NUMBER'},fat_g:{type:'NUMBER'}},required:['slot','kcal','protein_g','carbs_g','fat_g']}},
+ feedback:{type:'STRING'},next:{type:'STRING'}},required:['meals','feedback','next']};
 
 $('#send').onclick=async()=>{
  const date=cur,msg=$('#msg'),btn=$('#send');
- const e={weight:+$('#w').value||null,steps:+$('#s').value||null,bk:$('#bk').value.trim(),ln:$('#ln').value.trim(),dn:$('#dn').value.trim(),sk:$('#sk').value.trim(),training:$('#t').value.trim()};
+ const e={weight:+$('#w').value||null,steps:+$('#s').value||null,bk:$('#bk').value.trim(),ln:$('#ln').value.trim(),dn:$('#dn').value.trim(),sk:$('#sk').value.trim(),training:$('#t').value.trim(),done:$('#done').checked};
  e.food=[['Breakfast',e.bk],['Lunch',e.ln],['Dinner',e.dn],['Snacks and other drinks',e.sk]].filter(x=>x[1]).map(x=>x[0]+': '+x[1]).join('\n');
+ const ml=[['breakfast',e.bk],['lunch',e.ln],['dinner',e.dn],['snacks',e.sk]],got=ml.filter(q=>q[1]).map(q=>q[0]).join(', ')||'nothing',miss=ml.filter(q=>!q[1]).map(q=>q[0]).join(', ')||'none';
  if(!S.key){msg.textContent='Add your Gemini API key in Settings first.';return}
  if(!e.food&&!e.weight){msg.textContent='Enter at least your weight or what you ate.';return}
  const cut=t=>t.length>150?t.slice(0,150)+'…':t,one=t=>cut(String(t).replace(/\s+/g,' '));
@@ -127,8 +132,8 @@ $('#send').onclick=async()=>{
    const fd=f||(x.food?'Food: '+one(x.food):'');
    l+=(fd?'. '+fd:'')+(x.training?'. Training: '+one(x.training):'')}
   return l}).join('\n');
- const sys=`You are my personal trainer. About me: ${S.profile}. Daily targets: ${S.kcal} kcal, ${S.prot} g protein, ${S.steps} steps. Give honest, specific feedback and do not sugarcoat. Judge weight by the weekly trend, not a single day. Estimate calories and protein for ALL food logged on that day. Weigh packaged food by the grams given. When one of these saved foods appears, use its numbers exactly:\n${S.foods||'(none)'}\nAnswer in the JSON schema. "feedback" is a short honest assessment of that day; "tomorrow" is one concrete fix.`;
- const prompt=`Recent days:\n${hist||'none yet'}\n\nEntry for ${date}: weight ${e.weight??'not logged'} kg, steps ${e.steps??'not logged'}, training: ${e.training||'none'}\nFood and drinks so far (a meal that is not listed has not been eaten yet):\n${e.food||'nothing yet'}`;
+ const sys=`You are my personal trainer. About me: ${S.profile}. Daily targets: ${S.kcal} kcal, ${S.prot} g protein, ${S.steps} steps. Give honest, specific feedback and do not sugarcoat. Judge weight by the weekly trend, not a single day. Estimate the nutrition of every logged meal. In "meals" return exactly one entry per meal that has food logged (slot is one of breakfast, lunch, dinner, snacks) with kcal, protein_g, carbs_g and fat_g, and no entry for meals that are not logged. The day totals are the sum of the meals. Weigh packaged food by the grams given. When one of these saved foods appears, use its numbers exactly:\n${S.foods||'(none)'}\nAnswer in the JSON schema. Each request says whether the day is FINISHED or IN PROGRESS. If IN PROGRESS, the day is not over: meals that are not listed have simply not been eaten yet. Do NOT criticise missing meals or low totals so far, do NOT mention tomorrow, and do NOT judge the day as a whole. In "feedback", compare what is logged so far with the targets, state the calories and protein still available for the rest of today, and suggest what to eat next. "next" is one concrete suggestion for the next meal. If FINISHED, "feedback" is a short, honest assessment of the whole day and "next" is one concrete fix for tomorrow.`;
+ const prompt=`Recent days:\n${hist||'none yet'}\n\nDay status: ${e.done?'FINISHED (nothing more will be logged)':'IN PROGRESS (the day is not over; logged so far: '+got+'; not logged yet: '+miss+')'}\nEntry for ${date}: weight ${e.weight??'not logged'} kg, steps ${e.steps??'not logged'}, training: ${e.training||'none'}\nFood and drinks so far (a meal that is not listed has not been eaten yet):\n${e.food||'nothing yet'}`;
  btn.disabled=true;msg.textContent='Asking your trainer…';
  const ac=new AbortController(),t0=Date.now(),iv=setInterval(()=>{msg.textContent='Asking your trainer… '+Math.round((Date.now()-t0)/1000)+' s'},1000),to=setTimeout(()=>ac.abort(),90000);
  try{
@@ -149,7 +154,8 @@ $('#send').onclick=async()=>{
   const part=j.candidates?.[0]?.content?.parts?.find(x=>x.text&&!x.thought);
   if(!part)throw new Error('Empty reply ('+(j.promptFeedback?.blockReason||j.candidates?.[0]?.finishReason||'no content')+').');
   const o=JSON.parse(part.text);
-  S.days[date]={...e,cal:Math.round(o.calories),prot:Math.round(o.protein_g),meals:o.meals,feedback:o.feedback,tomorrow:o.tomorrow};
+  const sum=k=>Math.round((o.meals||[]).reduce((t,m)=>t+(+m[k]||0),0));
+  S.days[date]={...e,cal:sum('kcal'),prot:sum('protein_g'),carb:sum('carbs_g'),fat:sum('fat_g'),meals:o.meals,feedback:o.feedback,next:o.next};
   save();render();msg.textContent='Saved.';
  }catch(err){msg.textContent=err.name==='AbortError'?'No answer after 90 seconds. Tap Get feedback to try again, or pick a faster "flash-lite" model in Settings.':'Could not get feedback: '+err.message+' If this keeps happening, check the key and model names in Settings.'}
  clearInterval(iv);clearTimeout(to);btn.disabled=false;
