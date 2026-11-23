@@ -16,7 +16,7 @@ nav button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 h2{font-size:1.05rem;margin:0 0 8px}
 label{display:block;color:var(--mut);font-size:.85rem;margin:10px 0 3px}
 input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
-textarea{min-height:90px}
+textarea{min-height:90px}textarea.sm{min-height:64px}
 button.go{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:600 1rem system-ui}
 button:disabled{opacity:.5}
 .tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -36,7 +36,10 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
   <label for="d">Date</label><input id="d" type="date">
   <label for="w">Morning weight (kg)</label><input id="w" type="number" step="0.1" inputmode="decimal">
   <label for="s">Steps</label><input id="s" type="number" inputmode="numeric">
-  <label for="f">Food and drinks so far today (include oils, sauces, portions)</label><textarea id="f"></textarea>
+  <label for="bk">Breakfast (weigh portions, include oils, sauces and drinks)</label><textarea class="sm" id="bk"></textarea>
+  <label for="ln">Lunch</label><textarea class="sm" id="ln"></textarea>
+  <label for="dn">Dinner</label><textarea class="sm" id="dn"></textarea>
+  <label for="sk">Snacks and other drinks</label><textarea class="sm" id="sk"></textarea>
   <label for="t">Training</label><input id="t">
   <button class="go" id="send">Get feedback</button><div class="mut" id="msg"></div></div>
  <div class="card" id="fbcard" hidden><h2>Trainer feedback</h2><div id="meals" class="mut"></div><p class="fb" id="fb"></p><p class="fb" id="tm"></p>
@@ -55,6 +58,7 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
  <label for="g">Protein per day (g)</label><input id="g" type="number">
  <label for="st">Steps per day</label><input id="st" type="number">
  <label for="fd">Saved foods, one per line, e.g. Maggi lasagne portion = 745 kcal, 35 g protein</label><textarea id="fd"></textarea>
+ <label for="hf" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="hf" style="width:auto">Send a short food and training summary of past days to Gemini (turn off to send numbers only)</label>
  <button class="go" id="sv">Save settings</button><div class="mut" id="sm"></div></div></section>
 </main>
 <script>
@@ -67,6 +71,7 @@ const today=()=>new Date().toLocaleDateString('sv');
 let cur=today();
 if(S.model==='gemini-2.5-flash')S.model='gemini-3.7-flash';
 if(S.model2===undefined)S.model2='gemini-3.5-flash';
+if(S.histFood===undefined)S.histFood=true;
 const keys=()=>Object.keys(S.days).sort();
 
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -90,16 +95,16 @@ function render(){
   $('#chart').innerHTML=`<polyline fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.map((v,i)=>`${i/(pts.length-1)*300},${100-(v-mn)/(mx-mn)*100}`).join(' ')}"/>`;
   $('#cap').textContent=`Weight, last ${pts.length} entries: ${Math.min(...pts)}–${Math.max(...pts)} kg`;
  }else{$('#chart').innerHTML='';$('#cap').textContent='Log two mornings to see your weight trend.'}
- $('#d').value=cur;$('#w').value=d.weight??'';$('#s').value=d.steps??'';$('#f').value=d.food??'';$('#t').value=d.training??'';
+ $('#d').value=cur;$('#w').value=d.weight??'';$('#s').value=d.steps??'';const legacy=d.food&&!(d.bk||d.ln||d.dn||d.sk);$('#bk').value=legacy?d.food:(d.bk??'');$('#ln').value=d.ln??'';$('#dn').value=d.dn??'';$('#sk').value=d.sk??'';$('#t').value=d.training??'';
  $('#fbcard').hidden=!d.feedback;
  if(d.feedback){$('#fb').textContent=d.feedback;$('#tm').textContent=d.tomorrow?'Tomorrow: '+d.tomorrow:'';
   $('#meals').innerHTML=(d.meals||[]).map(m=>`${esc(m.name)}: ${esc(m.kcal)} kcal, ${esc(m.protein_g)} g`).join('<br>')}
  $('#hl').innerHTML='<h2>History</h2>'+(ks.length?ks.slice().reverse().map(k=>{const x=S.days[k];
-  return `<details><summary>${k}: ${x.weight??'–'} kg, ${x.steps??'–'} steps, ${x.cal??'–'} kcal, ${x.prot??'–'} g</summary><p class="mut">${esc(x.food)}</p><p class="fb">${esc(x.feedback)}</p></details>`}).join(''):'<p class="mut">No entries yet. Your first check-in appears here.</p>');
- $('#k').value=S.key;$('#m').value=S.model;$('#m2').value=S.model2||'';$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
+  return `<details><summary>${k}: ${x.weight??'–'} kg, ${x.steps??'–'} steps, ${x.cal??'–'} kcal, ${x.prot??'–'} g</summary><p class="fb mut">${esc(x.food)}</p><p class="fb">${esc(x.feedback)}</p></details>`}).join(''):'<p class="mut">No entries yet. Your first check-in appears here.</p>');
+ $('#k').value=S.key;$('#m').value=S.model;$('#m2').value=S.model2||'';$('#hf').checked=!!S.histFood;$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
 }
 
-$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.model2=$('#m2').value.trim();S.profile=$('#p').value;
+$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.model2=$('#m2').value.trim();S.histFood=$('#hf').checked;S.profile=$('#p').value;
  S.kcal=+$('#c').value||2200;S.prot=+$('#g').value||190;S.steps=+$('#st').value||9000;S.foods=$('#fd').value;const ok=save();render();$('#sm').textContent=ok?'Settings saved on this device. '+keyNote():'Could not save: this browser is blocking storage. Open the app in a normal (not private) Chrome window.'};
 
 $('#fix').onclick=()=>{const d=S.days[cur];const c=prompt('Calories for this day',d.cal);if(c===null)return;
@@ -111,12 +116,19 @@ const schema={type:'OBJECT',properties:{calories:{type:'NUMBER'},protein_g:{type
 
 $('#send').onclick=async()=>{
  const date=cur,msg=$('#msg'),btn=$('#send');
- const e={weight:+$('#w').value||null,steps:+$('#s').value||null,food:$('#f').value.trim(),training:$('#t').value.trim()};
+ const e={weight:+$('#w').value||null,steps:+$('#s').value||null,bk:$('#bk').value.trim(),ln:$('#ln').value.trim(),dn:$('#dn').value.trim(),sk:$('#sk').value.trim(),training:$('#t').value.trim()};
+ e.food=[['Breakfast',e.bk],['Lunch',e.ln],['Dinner',e.dn],['Snacks and other drinks',e.sk]].filter(x=>x[1]).map(x=>x[0]+': '+x[1]).join('\n');
  if(!S.key){msg.textContent='Add your Gemini API key in Settings first.';return}
  if(!e.food&&!e.weight){msg.textContent='Enter at least your weight or what you ate.';return}
- const hist=keys().filter(k=>k<date).slice(-7).map(k=>{const x=S.days[k];return `${k}: ${x.weight} kg, ${x.steps} steps, ${x.cal} kcal, ${x.prot} g protein`}).join('\n');
+ const cut=t=>t.length>150?t.slice(0,150)+'…':t,one=t=>cut(String(t).replace(/\s+/g,' '));
+ const hist=keys().filter(k=>k<date).slice(-14).map(k=>{const x=S.days[k];
+  let l=`${k}: ${x.weight??'?'} kg, ${x.steps??'?'} steps, ${x.cal??'?'} kcal, ${x.prot??'?'} g protein`;
+  if(S.histFood){const f=[['Breakfast',x.bk],['Lunch',x.ln],['Dinner',x.dn],['Snacks',x.sk]].filter(q=>q[1]).map(q=>q[0]+': '+one(q[1])).join('. ');
+   const fd=f||(x.food?'Food: '+one(x.food):'');
+   l+=(fd?'. '+fd:'')+(x.training?'. Training: '+one(x.training):'')}
+  return l}).join('\n');
  const sys=`You are my personal trainer. About me: ${S.profile}. Daily targets: ${S.kcal} kcal, ${S.prot} g protein, ${S.steps} steps. Give honest, specific feedback and do not sugarcoat. Judge weight by the weekly trend, not a single day. Estimate calories and protein for ALL food logged on that day. Weigh packaged food by the grams given. When one of these saved foods appears, use its numbers exactly:\n${S.foods||'(none)'}\nAnswer in the JSON schema. "feedback" is a short honest assessment of that day; "tomorrow" is one concrete fix.`;
- const prompt=`Recent days:\n${hist||'none yet'}\n\nEntry for ${date}: weight ${e.weight??'not logged'} kg, steps ${e.steps??'not logged'}, training: ${e.training||'none'}\nFood and drinks so far:\n${e.food||'nothing yet'}`;
+ const prompt=`Recent days:\n${hist||'none yet'}\n\nEntry for ${date}: weight ${e.weight??'not logged'} kg, steps ${e.steps??'not logged'}, training: ${e.training||'none'}\nFood and drinks so far (a meal that is not listed has not been eaten yet):\n${e.food||'nothing yet'}`;
  btn.disabled=true;msg.textContent='Asking your trainer…';
  const ac=new AbortController(),t0=Date.now(),iv=setInterval(()=>{msg.textContent='Asking your trainer… '+Math.round((Date.now()-t0)/1000)+' s'},1000),to=setTimeout(()=>ac.abort(),90000);
  try{
