@@ -49,6 +49,7 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
  <label for="k">Gemini API key (stored only on this device)</label><input id="k" type="password" autocomplete="off">
  <label for="m">Model name</label><input id="m">
  <button class="lnk" id="lm" type="button">Show models available to your key</button><div class="mut" id="ml"></div>
+ <label for="m2">Backup model (used automatically if the first one is busy or gone)</label><input id="m2">
  <label for="p">About you</label><textarea id="p"></textarea>
  <label for="c">Calories per day</label><input id="c" type="number">
  <label for="g">Protein per day (g)</label><input id="g" type="number">
@@ -65,6 +66,7 @@ const keyNote=()=>S.key?'API key stored, ends in …'+S.key.slice(-4)+'.':'No AP
 const today=()=>new Date().toLocaleDateString('sv');
 let cur=today();
 if(S.model==='gemini-2.5-flash')S.model='gemini-3.7-flash';
+if(S.model2===undefined)S.model2='gemini-3.5-flash';
 const keys=()=>Object.keys(S.days).sort();
 
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -94,10 +96,10 @@ function render(){
   $('#meals').innerHTML=(d.meals||[]).map(m=>`${esc(m.name)}: ${esc(m.kcal)} kcal, ${esc(m.protein_g)} g`).join('<br>')}
  $('#hl').innerHTML='<h2>History</h2>'+(ks.length?ks.slice().reverse().map(k=>{const x=S.days[k];
   return `<details><summary>${k}: ${x.weight??'–'} kg, ${x.steps??'–'} steps, ${x.cal??'–'} kcal, ${x.prot??'–'} g</summary><p class="mut">${esc(x.food)}</p><p class="fb">${esc(x.feedback)}</p></details>`}).join(''):'<p class="mut">No entries yet. Your first check-in appears here.</p>');
- $('#k').value=S.key;$('#m').value=S.model;$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
+ $('#k').value=S.key;$('#m').value=S.model;$('#m2').value=S.model2||'';$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
 }
 
-$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.profile=$('#p').value;
+$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.model2=$('#m2').value.trim();S.profile=$('#p').value;
  S.kcal=+$('#c').value||2200;S.prot=+$('#g').value||190;S.steps=+$('#st').value||9000;S.foods=$('#fd').value;const ok=save();render();$('#sm').textContent=ok?'Settings saved on this device. '+keyNote():'Could not save: this browser is blocking storage. Open the app in a normal (not private) Chrome window.'};
 
 $('#fix').onclick=()=>{const d=S.days[cur];const c=prompt('Calories for this day',d.cal);if(c===null)return;
@@ -118,18 +120,26 @@ $('#send').onclick=async()=>{
  btn.disabled=true;msg.textContent='Asking your trainer…';
  const ac=new AbortController(),t0=Date.now(),iv=setInterval(()=>{msg.textContent='Asking your trainer… '+Math.round((Date.now()-t0)/1000)+' s'},1000),to=setTimeout(()=>ac.abort(),90000);
  try{
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.model)}:generateContent`,{method:'POST',
-   headers:{'Content-Type':'application/json','x-goog-api-key':S.key},
-   body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:prompt}]}],
-    generationConfig:{responseMimeType:'application/json',responseSchema:schema,temperature:.3}}),signal:ac.signal});
-  const j=await r.json();
+  const body=JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:prompt}]}],
+   generationConfig:{responseMimeType:'application/json',responseSchema:schema,temperature:.3}});
+  const ms=[S.model,S.model2].filter(Boolean),order=[ms[0],ms[1]||ms[0],ms[0],ms[1]||ms[0]];
+  let r,j;
+  for(let i=0;i<order.length;i++){
+   r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(order[i])}:generateContent`,{method:'POST',
+    headers:{'Content-Type':'application/json','x-goog-api-key':S.key},body,signal:ac.signal});
+   j=await r.json();
+   if(r.ok)break;
+   const em=j.error?.message||('HTTP '+r.status);
+   if(i<order.length-1&&([404,429,500,503].includes(r.status)||/high demand|overloaded|unavailable|no longer available|not found/i.test(em))){await new Promise(z=>setTimeout(z,3000));continue}
+   throw new Error(em);
+  }
   if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));
   const part=j.candidates?.[0]?.content?.parts?.find(x=>x.text&&!x.thought);
   if(!part)throw new Error('Empty reply ('+(j.promptFeedback?.blockReason||j.candidates?.[0]?.finishReason||'no content')+').');
   const o=JSON.parse(part.text);
   S.days[date]={...e,cal:Math.round(o.calories),prot:Math.round(o.protein_g),meals:o.meals,feedback:o.feedback,tomorrow:o.tomorrow};
   save();render();msg.textContent='Saved.';
- }catch(err){msg.textContent=err.name==='AbortError'?'No answer after 90 seconds. Tap Get feedback to try again, or pick a faster "flash-lite" model in Settings.':'Could not get feedback: '+err.message+' Check the key and model name in Settings.'}
+ }catch(err){msg.textContent=err.name==='AbortError'?'No answer after 90 seconds. Tap Get feedback to try again, or pick a faster "flash-lite" model in Settings.':'Could not get feedback: '+err.message+' If this keeps happening, check the key and model names in Settings.'}
  clearInterval(iv);clearTimeout(to);btn.disabled=false;
 };
 $('#lm').onclick=async()=>{const o=$('#ml'),k=$('#k').value.trim()||S.key;
