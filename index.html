@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<link rel="manifest" href="manifest.json"><meta name="theme-color" content="#14202B">
+<link rel="icon" href="icon-192.png"><title>Trainer log</title>
+<style>
+:root{--bg:#E9EEF2;--ink:#14202B;--mut:#5B6B7A;--card:#fff;--acc:#D6452B;--line:#CBD5DD}
+@media(prefers-color-scheme:dark){:root{--bg:#10171E;--ink:#E6EDF3;--mut:#8DA0B0;--card:#1A242E;--acc:#FF7A52;--line:#2B3946}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:560px;margin:0 auto;padding:14px}
+nav{display:flex;gap:6px;margin-bottom:12px}
+nav button{flex:1;padding:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;font:inherit}
+nav button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+h2{font-size:1.05rem;margin:0 0 8px}
+label{display:block;color:var(--mut);font-size:.85rem;margin:10px 0 3px}
+input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{min-height:90px}
+button.go{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:600 1rem system-ui}
+button:disabled{opacity:.5}
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile b{display:block;font-size:1.5rem}.tile span{color:var(--mut);font-size:.85rem}
+.bar{height:6px;background:var(--line);border-radius:3px;margin-top:4px}.bar i{display:block;height:100%;background:var(--acc);border-radius:3px}
+svg{width:100%;height:110px}
+.fb{white-space:pre-wrap}.mut{color:var(--mut);font-size:.9rem}
+.sec{display:none}.sec.on{display:block}
+details{border-top:1px solid var(--line);padding:8px 0}summary{cursor:pointer}
+a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:0;text-decoration:underline}
+</style></head><body><main>
+<nav><button data-t="today" class="on">Today</button><button data-t="hist">History</button><button data-t="set">Settings</button></nav>
+
+<section id="today" class="sec on">
+ <div class="card"><div class="tiles" id="tiles"></div><svg id="chart" viewBox="0 0 300 100" preserveAspectRatio="none"></svg><div class="mut" id="cap"></div></div>
+ <div class="card"><h2>Check-in</h2>
+  <label for="d">Date</label><input id="d" type="date">
+  <label for="w">Morning weight (kg)</label><input id="w" type="number" step="0.1" inputmode="decimal">
+  <label for="s">Steps</label><input id="s" type="number" inputmode="numeric">
+  <label for="f">Food and drinks so far today (include oils, sauces, portions)</label><textarea id="f"></textarea>
+  <label for="t">Training</label><input id="t">
+  <button class="go" id="send">Get feedback</button><div class="mut" id="msg"></div></div>
+ <div class="card" id="fbcard" hidden><h2>Trainer feedback</h2><div id="meals" class="mut"></div><p class="fb" id="fb"></p><p class="fb" id="tm"></p>
+  <button class="lnk" id="fix">Correct calories and protein</button></div>
+</section>
+
+<section id="hist" class="sec"><div class="card" id="hl"></div></section>
+
+<section id="set" class="sec"><div class="card"><h2>Settings</h2>
+ <label for="k">Gemini API key (stored only on this device)</label><input id="k" type="password" autocomplete="off">
+ <label for="m">Model name (check Google AI Studio for current names)</label><input id="m">
+ <label for="p">About you</label><textarea id="p"></textarea>
+ <label for="c">Calories per day</label><input id="c" type="number">
+ <label for="g">Protein per day (g)</label><input id="g" type="number">
+ <label for="st">Steps per day</label><input id="st" type="number">
+ <label for="fd">Saved foods, one per line, e.g. Maggi lasagne portion = 745 kcal, 35 g protein</label><textarea id="fd"></textarea>
+ <button class="go" id="sv">Save settings</button><div class="mut" id="sm"></div></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s), esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let S;try{S=JSON.parse(localStorage.getItem('fit'))}catch(e){}
+S=S||{key:'',model:'gemini-2.5-flash',kcal:2200,prot:190,steps:9000,profile:'Not set yet. Add age, sex, height, weight, job and goal in Settings.',foods:'',days:{}};
+const save=()=>{try{localStorage.setItem('fit',JSON.stringify(S))}catch(e){}};
+const today=()=>new Date().toLocaleDateString('sv');
+let cur=today();
+const keys=()=>Object.keys(S.days).sort();
+
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
+ document.querySelectorAll('nav button').forEach(x=>x.classList.toggle('on',x===b));
+ document.querySelectorAll('.sec').forEach(x=>x.classList.toggle('on',x.id===b.dataset.t));
+});
+
+function render(){
+ const d=S.days[cur]||{}, ks=keys();
+ const ws=ks.filter(k=>S.days[k].weight).map(k=>S.days[k].weight), last7=ws.slice(-7);
+ const avg=last7.length?(last7.reduce((a,b)=>a+b,0)/last7.length).toFixed(1):'–';
+ const pct=(v,t)=>Math.min(100,Math.round((v||0)/t*100));
+ $('#tiles').innerHTML=
+  `<div class="tile"><b>${avg}</b><span>7-day average weight (kg)</span></div>`+
+  `<div class="tile"><b>${d.weight??'–'}</b><span>Weight on this day (kg)</span></div>`+
+  `<div class="tile"><b>${d.cal??'–'}</b><span>Calories of ${S.kcal}</span><div class="bar"><i style="width:${pct(d.cal,S.kcal)}%"></i></div></div>`+
+  `<div class="tile"><b>${d.prot??'–'}</b><span>Protein of ${S.prot} g</span><div class="bar"><i style="width:${pct(d.prot,S.prot)}%"></i></div></div>`+
+  `<div class="tile"><b>${d.steps??'–'}</b><span>Steps of ${S.steps}</span><div class="bar"><i style="width:${pct(d.steps,S.steps)}%"></i></div></div>`;
+ const pts=ws.slice(-30);
+ if(pts.length>1){const mn=Math.min(...pts)-.5,mx=Math.max(...pts)+.5;
+  $('#chart').innerHTML=`<polyline fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.map((v,i)=>`${i/(pts.length-1)*300},${100-(v-mn)/(mx-mn)*100}`).join(' ')}"/>`;
+  $('#cap').textContent=`Weight, last ${pts.length} entries: ${Math.min(...pts)}–${Math.max(...pts)} kg`;
+ }else{$('#chart').innerHTML='';$('#cap').textContent='Log two mornings to see your weight trend.'}
+ $('#d').value=cur;$('#w').value=d.weight??'';$('#s').value=d.steps??'';$('#f').value=d.food??'';$('#t').value=d.training??'';
+ $('#fbcard').hidden=!d.feedback;
+ if(d.feedback){$('#fb').textContent=d.feedback;$('#tm').textContent=d.tomorrow?'Tomorrow: '+d.tomorrow:'';
+  $('#meals').innerHTML=(d.meals||[]).map(m=>`${esc(m.name)}: ${esc(m.kcal)} kcal, ${esc(m.protein_g)} g`).join('<br>')}
+ $('#hl').innerHTML='<h2>History</h2>'+(ks.length?ks.slice().reverse().map(k=>{const x=S.days[k];
+  return `<details><summary>${k}: ${x.weight??'–'} kg, ${x.steps??'–'} steps, ${x.cal??'–'} kcal, ${x.prot??'–'} g</summary><p class="mut">${esc(x.food)}</p><p class="fb">${esc(x.feedback)}</p></details>`}).join(''):'<p class="mut">No entries yet. Your first check-in appears here.</p>');
+ $('#k').value=S.key;$('#m').value=S.model;$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
+}
+
+$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-2.5-flash';S.profile=$('#p').value;
+ S.kcal=+$('#c').value||2200;S.prot=+$('#g').value||190;S.steps=+$('#st').value||9000;S.foods=$('#fd').value;save();render();$('#sm').textContent='Settings saved.'};
+
+$('#fix').onclick=()=>{const d=S.days[cur];const c=prompt('Calories for this day',d.cal);if(c===null)return;
+ const p=prompt('Protein (g) for this day',d.prot);if(p===null)return;d.cal=+c||d.cal;d.prot=+p||d.prot;save();render()};
+
+const schema={type:'OBJECT',properties:{calories:{type:'NUMBER'},protein_g:{type:'NUMBER'},
+ meals:{type:'ARRAY',items:{type:'OBJECT',properties:{name:{type:'STRING'},kcal:{type:'NUMBER'},protein_g:{type:'NUMBER'}},required:['name','kcal','protein_g']}},
+ feedback:{type:'STRING'},tomorrow:{type:'STRING'}},required:['calories','protein_g','meals','feedback','tomorrow']};
+
+$('#send').onclick=async()=>{
+ const date=cur,msg=$('#msg'),btn=$('#send');
+ const e={weight:+$('#w').value||null,steps:+$('#s').value||null,food:$('#f').value.trim(),training:$('#t').value.trim()};
+ if(!S.key){msg.textContent='Add your Gemini API key in Settings first.';return}
+ if(!e.food&&!e.weight){msg.textContent='Enter at least your weight or what you ate.';return}
+ const hist=keys().filter(k=>k<date).slice(-7).map(k=>{const x=S.days[k];return `${k}: ${x.weight} kg, ${x.steps} steps, ${x.cal} kcal, ${x.prot} g protein`}).join('\n');
+ const sys=`You are my personal trainer. About me: ${S.profile}. Daily targets: ${S.kcal} kcal, ${S.prot} g protein, ${S.steps} steps. Give honest, specific feedback and do not sugarcoat. Judge weight by the weekly trend, not a single day. Estimate calories and protein for ALL food logged on that day. Weigh packaged food by the grams given. When one of these saved foods appears, use its numbers exactly:\n${S.foods||'(none)'}\nAnswer in the JSON schema. "feedback" is a short honest assessment of that day; "tomorrow" is one concrete fix.`;
+ const prompt=`Recent days:\n${hist||'none yet'}\n\nEntry for ${date}: weight ${e.weight??'not logged'} kg, steps ${e.steps??'not logged'}, training: ${e.training||'none'}\nFood and drinks so far:\n${e.food||'nothing yet'}`;
+ btn.disabled=true;msg.textContent='Asking your trainer…';
+ try{
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.model)}:generateContent`,{method:'POST',
+   headers:{'Content-Type':'application/json','x-goog-api-key':S.key},
+   body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:prompt}]}],
+    generationConfig:{responseMimeType:'application/json',responseSchema:schema,temperature:.3}})});
+  const j=await r.json();
+  if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));
+  const o=JSON.parse(j.candidates[0].content.parts[0].text);
+  S.days[date]={...e,cal:Math.round(o.calories),prot:Math.round(o.protein_g),meals:o.meals,feedback:o.feedback,tomorrow:o.tomorrow};
+  save();render();msg.textContent='Saved.';
+ }catch(err){msg.textContent='Could not get feedback: '+err.message+' Check the key and model name in Settings.'}
+ btn.disabled=false;
+};
+$('#d').max=today();$('#d').onchange=()=>{cur=$('#d').value||today();$('#msg').textContent='';render()};
+render();
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+</script></body></html>
