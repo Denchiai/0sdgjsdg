@@ -47,7 +47,8 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
 
 <section id="set" class="sec"><div class="card"><h2>Settings</h2>
  <label for="k">Gemini API key (stored only on this device)</label><input id="k" type="password" autocomplete="off">
- <label for="m">Model name (check Google AI Studio for current names)</label><input id="m">
+ <label for="m">Model name</label><input id="m">
+ <button class="lnk" id="lm" type="button">Show models available to your key</button><div class="mut" id="ml"></div>
  <label for="p">About you</label><textarea id="p"></textarea>
  <label for="c">Calories per day</label><input id="c" type="number">
  <label for="g">Protein per day (g)</label><input id="g" type="number">
@@ -58,10 +59,12 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
 <script>
 const $=s=>document.querySelector(s), esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let S;try{S=JSON.parse(localStorage.getItem('fit'))}catch(e){}
-S=S||{key:'',model:'gemini-2.5-flash',kcal:2200,prot:190,steps:9000,profile:'Not set yet. Add age, sex, height, weight, job and goal in Settings.',foods:'',days:{}};
-const save=()=>{try{localStorage.setItem('fit',JSON.stringify(S))}catch(e){}};
+S=S||{key:'',model:'gemini-3.7-flash',kcal:2200,prot:190,steps:9000,profile:'Not set yet. Add age, sex, height, weight, job and goal in Settings.',foods:'',days:{}};
+const save=()=>{try{const v=JSON.stringify(S);localStorage.setItem('fit',v);return localStorage.getItem('fit')===v}catch(e){return false}};
+const keyNote=()=>S.key?'API key stored, ends in …'+S.key.slice(-4)+'.':'No API key stored yet.';
 const today=()=>new Date().toLocaleDateString('sv');
 let cur=today();
+if(S.model==='gemini-2.5-flash')S.model='gemini-3.7-flash';
 const keys=()=>Object.keys(S.days).sort();
 
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{
@@ -94,8 +97,8 @@ function render(){
  $('#k').value=S.key;$('#m').value=S.model;$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
 }
 
-$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-2.5-flash';S.profile=$('#p').value;
- S.kcal=+$('#c').value||2200;S.prot=+$('#g').value||190;S.steps=+$('#st').value||9000;S.foods=$('#fd').value;save();render();$('#sm').textContent='Settings saved.'};
+$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.profile=$('#p').value;
+ S.kcal=+$('#c').value||2200;S.prot=+$('#g').value||190;S.steps=+$('#st').value||9000;S.foods=$('#fd').value;const ok=save();render();$('#sm').textContent=ok?'Settings saved on this device. '+keyNote():'Could not save: this browser is blocking storage. Open the app in a normal (not private) Chrome window.'};
 
 $('#fix').onclick=()=>{const d=S.days[cur];const c=prompt('Calories for this day',d.cal);if(c===null)return;
  const p=prompt('Protein (g) for this day',d.prot);if(p===null)return;d.cal=+c||d.cal;d.prot=+p||d.prot;save();render()};
@@ -113,20 +116,32 @@ $('#send').onclick=async()=>{
  const sys=`You are my personal trainer. About me: ${S.profile}. Daily targets: ${S.kcal} kcal, ${S.prot} g protein, ${S.steps} steps. Give honest, specific feedback and do not sugarcoat. Judge weight by the weekly trend, not a single day. Estimate calories and protein for ALL food logged on that day. Weigh packaged food by the grams given. When one of these saved foods appears, use its numbers exactly:\n${S.foods||'(none)'}\nAnswer in the JSON schema. "feedback" is a short honest assessment of that day; "tomorrow" is one concrete fix.`;
  const prompt=`Recent days:\n${hist||'none yet'}\n\nEntry for ${date}: weight ${e.weight??'not logged'} kg, steps ${e.steps??'not logged'}, training: ${e.training||'none'}\nFood and drinks so far:\n${e.food||'nothing yet'}`;
  btn.disabled=true;msg.textContent='Asking your trainer…';
+ const ac=new AbortController(),t0=Date.now(),iv=setInterval(()=>{msg.textContent='Asking your trainer… '+Math.round((Date.now()-t0)/1000)+' s'},1000),to=setTimeout(()=>ac.abort(),90000);
  try{
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(S.model)}:generateContent`,{method:'POST',
    headers:{'Content-Type':'application/json','x-goog-api-key':S.key},
    body:JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:prompt}]}],
-    generationConfig:{responseMimeType:'application/json',responseSchema:schema,temperature:.3}})});
+    generationConfig:{responseMimeType:'application/json',responseSchema:schema,temperature:.3}}),signal:ac.signal});
   const j=await r.json();
   if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));
-  const o=JSON.parse(j.candidates[0].content.parts[0].text);
+  const part=j.candidates?.[0]?.content?.parts?.find(x=>x.text&&!x.thought);
+  if(!part)throw new Error('Empty reply ('+(j.promptFeedback?.blockReason||j.candidates?.[0]?.finishReason||'no content')+').');
+  const o=JSON.parse(part.text);
   S.days[date]={...e,cal:Math.round(o.calories),prot:Math.round(o.protein_g),meals:o.meals,feedback:o.feedback,tomorrow:o.tomorrow};
   save();render();msg.textContent='Saved.';
- }catch(err){msg.textContent='Could not get feedback: '+err.message+' Check the key and model name in Settings.'}
- btn.disabled=false;
+ }catch(err){msg.textContent=err.name==='AbortError'?'No answer after 90 seconds. Tap Get feedback to try again, or pick a faster "flash-lite" model in Settings.':'Could not get feedback: '+err.message+' Check the key and model name in Settings.'}
+ clearInterval(iv);clearTimeout(to);btn.disabled=false;
 };
+$('#lm').onclick=async()=>{const o=$('#ml'),k=$('#k').value.trim()||S.key;
+ if(!k){o.textContent='Enter your API key first.';return}
+ o.textContent='Loading…';
+ try{const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',{headers:{'x-goog-api-key':k}});
+  const j=await r.json();if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));
+  const ms=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&/gemini-[\d.]+-(flash|pro)/.test(m.name)&&!/tts|image|live|audio|robot|transcribe/.test(m.name)).map(m=>m.name.replace('models/','')).sort().reverse();
+  o.innerHTML=ms.length?'Tap one to use it:<br>'+ms.map(n=>`<button class="lnk" type="button" data-m="${esc(n)}">${esc(n)}</button>`).join('<br>'):'No text models found for this key.';
+  o.querySelectorAll('button').forEach(b=>b.onclick=()=>{$('#m').value=b.dataset.m;o.textContent='Selected '+b.dataset.m+'. Now tap Save settings.'});
+ }catch(e){o.textContent='Could not load models: '+e.message}};
 $('#d').max=today();$('#d').onchange=()=>{cur=$('#d').value||today();$('#msg').textContent='';render()};
-render();
+render();$('#sm').textContent=keyNote();
 if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
 </script></body></html>
