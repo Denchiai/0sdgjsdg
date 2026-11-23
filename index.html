@@ -16,7 +16,7 @@ nav button.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 h2{font-size:1.05rem;margin:0 0 8px}
 label{display:block;color:var(--mut);font-size:.85rem;margin:10px 0 3px}
 input,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
-textarea{min-height:90px}textarea.sm{min-height:64px}
+textarea{min-height:90px}textarea.sm{min-height:64px}ul{margin:4px 0 8px;padding-left:20px}
 table{width:100%;border-collapse:collapse;font-size:.9rem}th,td{text-align:right;padding:4px 6px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}tr.tot td{font-weight:600}
 button.go{width:100%;margin-top:12px;padding:12px;border:0;border-radius:8px;background:var(--acc);color:#fff;font:600 1rem system-ui}
 button:disabled{opacity:.5}
@@ -48,7 +48,10 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
   <button class="lnk" id="fix">Correct calories and protein</button></div>
 </section>
 
-<section id="hist" class="sec"><div class="card" id="hl"></div></section>
+<section id="hist" class="sec">
+ <div class="card"><h2>Weekly review</h2><p class="mut">Gemini reads your last 7 days and tells you what worked and what to change. Needs at least 3 finished days.</p>
+  <button class="go" id="wr">Review my last 7 days</button><div class="mut" id="wm"></div><div id="wo"></div></div>
+ <div class="card" id="hl"></div></section>
 
 <section id="set" class="sec"><div class="card"><h2>Settings</h2>
  <label for="k">Gemini API key (stored only on this device)</label><input id="k" type="password" autocomplete="off">
@@ -59,6 +62,7 @@ a.lnk,button.lnk{background:none;border:0;color:var(--acc);font:inherit;padding:
  <label for="c">Calories per day</label><input id="c" type="number">
  <label for="g">Protein per day (g)</label><input id="g" type="number">
  <label for="st">Steps per day</label><input id="st" type="number">
+ <label for="gw">Goal weight in kg (optional, used for the trend)</label><input id="gw" type="number" step="0.1" inputmode="decimal">
  <label for="fd">Saved foods, one per line, e.g. Maggi lasagne portion = 745 kcal, 35 g protein</label><textarea id="fd"></textarea>
  <label for="hf" style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="hf" style="width:auto">Send a short food and training summary of past days to Gemini (turn off to send numbers only)</label>
  <button class="go" id="sv">Save settings</button><div class="mut" id="sm"></div></div></section>
@@ -91,12 +95,8 @@ function render(){
   `<div class="tile"><b>${d.weight??'–'}</b><span>Weight on this day (kg)</span></div>`+
   `<div class="tile"><b>${d.cal??'–'}</b><span>Calories of ${S.kcal}</span><div class="bar"><i style="width:${pct(d.cal,S.kcal)}%"></i></div></div>`+
   `<div class="tile"><b>${d.prot??'–'}</b><span>Protein of ${S.prot} g</span><div class="bar"><i style="width:${pct(d.prot,S.prot)}%"></i></div></div>`+
-  `<div class="tile"><b>${d.steps??'–'}</b><span>Steps of ${S.steps}</span><div class="bar"><i style="width:${pct(d.steps,S.steps)}%"></i></div></div>`;
- const pts=ws.slice(-30);
- if(pts.length>1){const mn=Math.min(...pts)-.5,mx=Math.max(...pts)+.5;
-  $('#chart').innerHTML=`<polyline fill="none" stroke="var(--acc)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts.map((v,i)=>`${i/(pts.length-1)*300},${100-(v-mn)/(mx-mn)*100}`).join(' ')}"/>`;
-  $('#cap').textContent=`Weight, last ${pts.length} entries: ${Math.min(...pts)}–${Math.max(...pts)} kg`;
- }else{$('#chart').innerHTML='';$('#cap').textContent='Log two mornings to see your weight trend.'}
+  `<div class="tile"><b>${d.steps??'–'}</b><span>Steps of ${S.steps}</span><div class="bar"><i style="width:${pct(d.steps,S.steps)}%"></i></div></div>`+trendTile();
+ drawChart();
  $('#d').value=cur;$('#w').value=d.weight??'';$('#s').value=d.steps??'';const legacy=d.food&&!(d.bk||d.ln||d.dn||d.sk);$('#bk').value=legacy?d.food:(d.bk??'');$('#ln').value=d.ln??'';$('#dn').value=d.dn??'';$('#sk').value=d.sk??'';$('#done').checked=d.done??(cur<today());$('#t').value=d.training??'';
  $('#fbcard').hidden=!d.feedback;
  if(d.feedback){$('#fb').textContent=d.feedback;const nx=d.next||d.tomorrow;$('#tm').textContent=nx?(d.done?'Tomorrow: ':'Next: ')+nx:'';
@@ -105,10 +105,10 @@ function render(){
   $('#meals').innerHTML=rows?`<table><tr><th></th><th>kcal</th><th>Protein g</th><th>Carbs g</th><th>Fat g</th></tr>${rows}<tr class="tot"><td>Total</td><td>${n(d.cal)}</td><td>${n(d.prot)}</td><td>${n(d.carb)}</td><td>${n(d.fat)}</td></tr></table>`:''}
  $('#hl').innerHTML='<h2>History</h2>'+(ks.length?ks.slice().reverse().map(k=>{const x=S.days[k];
   return `<details><summary>${k}: ${x.weight??'–'} kg, ${x.steps??'–'} steps, ${x.cal??'–'} kcal, ${x.prot??'–'} g</summary><p class="fb mut">${esc(x.food)}</p><p class="fb">${esc(x.feedback)}</p></details>`}).join(''):'<p class="mut">No entries yet. Your first check-in appears here.</p>');
- $('#k').value=S.key;$('#m').value=S.model;$('#m2').value=S.model2||'';$('#hf').checked=!!S.histFood;$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
+ $('#k').value=S.key;$('#m').value=S.model;$('#m2').value=S.model2||'';$('#hf').checked=!!S.histFood;$('#gw').value=S.goal??'';showReview();$('#p').value=S.profile;$('#c').value=S.kcal;$('#g').value=S.prot;$('#st').value=S.steps;$('#fd').value=S.foods;
 }
 
-$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.model2=$('#m2').value.trim();S.histFood=$('#hf').checked;S.profile=$('#p').value;
+$('#sv').onclick=()=>{S.key=$('#k').value.trim();S.model=$('#m').value.trim()||'gemini-3.7-flash';S.model2=$('#m2').value.trim();S.histFood=$('#hf').checked;S.goal=+$('#gw').value||null;S.profile=$('#p').value;
  S.kcal=+$('#c').value||2200;S.prot=+$('#g').value||190;S.steps=+$('#st').value||9000;S.foods=$('#fd').value;const ok=save();render();$('#sm').textContent=ok?'Settings saved on this device. '+keyNote():'Could not save: this browser is blocking storage. Open the app in a normal (not private) Chrome window.'};
 
 $('#fix').onclick=()=>{const d=S.days[cur];const c=prompt('Calories for this day',d.cal);if(c===null)return;
@@ -159,6 +159,90 @@ $('#send').onclick=async()=>{
   save();render();msg.textContent='Saved.';
  }catch(err){msg.textContent=err.name==='AbortError'?'No answer after 90 seconds. Tap Get feedback to try again, or pick a faster "flash-lite" model in Settings.':'Could not get feedback: '+err.message+' If this keeps happening, check the key and model names in Settings.'}
  clearInterval(iv);clearTimeout(to);btn.disabled=false;
+};
+
+const wpts=()=>keys().filter(k=>S.days[k].weight).map(k=>({k,t:Date.parse(k+'T12:00:00'),w:S.days[k].weight}));
+function trend(){
+ const P=wpts();if(P.length<3)return null;
+ const tL=P[P.length-1].t,W=P.filter(p=>tL-p.t<=14*864e5);
+ if(W.length<3||(tL-W[0].t)<5*864e5)return null;
+ const xs=W.map(p=>(p.t-tL)/864e5),ys=W.map(p=>p.w),n=W.length,mx=xs.reduce((q,v)=>q+v,0)/n,my=ys.reduce((q,v)=>q+v,0)/n;
+ let sxy=0,sxx=0;xs.forEach((x,i)=>{sxy+=(x-mx)*(ys[i]-my);sxx+=(x-mx)**2});
+ const b=sxy/sxx,a=my-b*mx;
+ return {perWeek:b*7,a,b,xmin:xs[0],tL,n,days:Math.round(-xs[0])};
+}
+function trendTile(){
+ const T=trend(),st='style="grid-column:1/-1"';
+ if(!T)return `<div class="tile" ${st}><b>–</b><span>Weight trend: needs 3 weigh-ins spread over at least 5 days.</span></div>`;
+ const r=T.perWeek;let note='';
+ if(S.goal){const left=T.a-S.goal;
+  if(left<=0)note=` You are at or below your goal of ${S.goal} kg.`;
+  else if(r<-0.05){const dt=new Date(T.tL+Math.round(left/(-r/7))*864e5).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});note=` At this pace you reach ${S.goal} kg around ${dt} (rough guess, assumes the trend continues).`}
+  else note=` Not trending toward your goal of ${S.goal} kg yet.`}
+ return `<div class="tile" ${st}><b>${r>0?'+':''}${r.toFixed(2)} kg/week</b><span>Trend over ${T.n} weigh-ins in the last ${T.days} days.${note}</span></div>`;
+}
+function drawChart(){
+ const P=wpts().slice(-30);
+ if(P.length<2){$('#chart').innerHTML='';$('#cap').textContent='Log two mornings to see your weight trend.';return}
+ const t0=P[0].t,span=Math.max(P[P.length-1].t-t0,1),g=S.goal||null,T=trend();
+ const vals=P.map(p=>p.w).concat(g?[g]:[]),mn=Math.min(...vals)-.5,mx=Math.max(...vals)+.5;
+ const Y=v=>100-(v-mn)/(mx-mn)*100,X=t=>(t-t0)/span*300,ne='vector-effect="non-scaling-stroke"';
+ let h='';
+ if(g)h+=`<line x1="0" x2="300" y1="${Y(g)}" y2="${Y(g)}" stroke="var(--mut)" stroke-width="1" stroke-dasharray="1 4" ${ne}/>`;
+ if(T)h+=`<line x1="${X(Math.max(T.tL+T.xmin*864e5,t0))}" y1="${Y(T.a+T.b*Math.max(T.xmin,(t0-T.tL)/864e5))}" x2="${X(T.tL)}" y2="${Y(T.a)}" stroke="var(--ink)" stroke-width="1.5" stroke-dasharray="5 4" ${ne}/>`;
+ h+=`<polyline fill="none" stroke="var(--acc)" stroke-width="2" ${ne} points="${P.map(p=>X(p.t)+','+Y(p.w)).join(' ')}"/>`;
+ $('#chart').innerHTML=h;
+ const w=P.map(p=>p.w);
+ $('#cap').textContent=`Last ${P.length} weigh-ins, ${Math.min(...w)}–${Math.max(...w)} kg.`+(T?' Dashed: trend.':'')+(g?' Dotted: goal.':'');
+}
+function showReview(){const R=S.review,li=a=>(a||[]).map(x=>`<li>${esc(x)}</li>`).join('');
+ $('#wo').innerHTML=R?`<p class="mut">Review from ${esc(R.date)}</p><p class="fb">${esc(R.verdict)}</p><h2>Went well</h2><ul>${li(R.went_well)}</ul><h2>To fix</h2><ul>${li(R.to_fix)}</ul><h2>Focus for next week</h2><p class="fb">${esc(R.focus)}</p>`:''}
+async function gem(sys,prompt,schema,signal){
+ const body=JSON.stringify({systemInstruction:{parts:[{text:sys}]},contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',responseSchema:schema,temperature:.3}});
+ const ms=[S.model,S.model2].filter(Boolean),order=[ms[0],ms[1]||ms[0],ms[0],ms[1]||ms[0]];
+ let r,j;
+ for(let i=0;i<order.length;i++){
+  r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(order[i])}:generateContent`,{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':S.key},body,signal});
+  j=await r.json();
+  if(r.ok)break;
+  const em=j.error?.message||('HTTP '+r.status);
+  if(i<order.length-1&&([404,429,500,503].includes(r.status)||/high demand|overloaded|unavailable|no longer available|not found/i.test(em))){await new Promise(z=>setTimeout(z,3000));continue}
+  throw new Error(em);
+ }
+ if(!r.ok)throw new Error(j.error?.message||('HTTP '+r.status));
+ const part=j.candidates?.[0]?.content?.parts?.find(x=>x.text&&!x.thought);
+ if(!part)throw new Error('Empty reply ('+(j.promptFeedback?.blockReason||j.candidates?.[0]?.finishReason||'no content')+').');
+ return JSON.parse(part.text);
+}
+function dayLine(k){const x=S.days[k],one=t=>{t=String(t).replace(/\s+/g,' ');return t.length>150?t.slice(0,150)+'…':t};
+ let l=`${k}: ${x.weight??'?'} kg, ${x.steps??'?'} steps, ${x.cal??'?'} kcal, ${x.prot??'?'} g protein`;
+ if(S.histFood){const f=[['Breakfast',x.bk],['Lunch',x.ln],['Dinner',x.dn],['Snacks',x.sk]].filter(q=>q[1]).map(q=>q[0]+': '+one(q[1])).join('. ');
+  const fd=f||(x.food?'Food: '+one(x.food):'');l+=(fd?'. '+fd:'')+(x.training?'. Training: '+one(x.training):'')}
+ return l}
+const rschema={type:'OBJECT',properties:{verdict:{type:'STRING'},went_well:{type:'ARRAY',items:{type:'STRING'}},to_fix:{type:'ARRAY',items:{type:'STRING'}},focus:{type:'STRING'}},required:['verdict','went_well','to_fix','focus']};
+$('#wr').onclick=async()=>{
+ const m=$('#wm'),btn=$('#wr'),end=today();
+ if(!S.key){m.textContent='Add your Gemini API key in Settings first.';return}
+ const win=[...Array(7)].map((_,i)=>new Date(Date.now()-(6-i)*864e5).toLocaleDateString('sv')).filter(k=>S.days[k]);
+ const full=win.filter(k=>k<end||S.days[k].done);
+ if(full.length<3){m.textContent='Log at least 3 finished days in the last 7 days first (you have '+full.length+').';return}
+ const avg=f=>{const v=full.map(k=>S.days[k][f]).filter(x=>x!=null);return v.length?Math.round(v.reduce((q,z)=>q+z,0)/v.length):'n/a'};
+ const cnt=(f,fn)=>full.filter(k=>S.days[k][f]!=null&&fn(S.days[k][f])).length;
+ const ws=win.filter(k=>S.days[k].weight),T=trend();
+ const stats=[`Finished days in the last 7 days: ${full.length}`,
+  `Average calories: ${avg('cal')} (target ${S.kcal}); days at or under target plus 100: ${cnt('cal',v=>v<=S.kcal+100)}`,
+  `Average protein: ${avg('prot')} g (target ${S.prot}); days at or above target: ${cnt('prot',v=>v>=S.prot)}`,
+  `Average steps: ${avg('steps')} (target ${S.steps}); days at or above target: ${cnt('steps',v=>v>=S.steps)}`,
+  ws.length>1?`Weight: ${S.days[ws[0]].weight} kg on ${ws[0]} to ${S.days[ws[ws.length-1]].weight} kg on ${ws[ws.length-1]}`:'Weight: fewer than 2 weigh-ins this week',
+  T?`Weight trend over the last ${T.days} days: ${T.perWeek.toFixed(2)} kg per week`:'Weight trend: not enough data yet',
+  S.goal?`Goal weight: ${S.goal} kg`:'No goal weight set'].join('\n');
+ const sys=`You are my personal trainer doing a weekly review. About me: ${S.profile}. Daily targets: ${S.kcal} kcal, ${S.prot} g protein, ${S.steps} steps. Be honest and specific and do not sugarcoat. Use the computed stats exactly as given and do not redo the arithmetic. Judge weight by the trend, not single days. Answer in the JSON schema: "verdict" is 2 to 4 sentences on the week; "went_well" and "to_fix" are 2 to 4 short items each that name specific days or foods where the data shows them; "focus" is the single habit to work on next week. Saved foods (use these numbers exactly):\n${S.foods||'(none)'}`;
+ const prompt=`Computed stats:\n${stats}\n\nDaily log:\n${full.map(dayLine).join('\n')}`;
+ const ac=new AbortController(),to=setTimeout(()=>ac.abort(),90000);
+ btn.disabled=true;m.textContent='Reviewing your week…';
+ try{const o=await gem(sys,prompt,rschema,ac.signal);S.review={date:end,...o};save();showReview();m.textContent='Done.'}
+ catch(err){m.textContent=err.name==='AbortError'?'No answer after 90 seconds. Tap again to retry.':'Could not get the review: '+err.message}
+ clearTimeout(to);btn.disabled=false;
 };
 $('#lm').onclick=async()=>{const o=$('#ml'),k=$('#k').value.trim()||S.key;
  if(!k){o.textContent='Enter your API key first.';return}
